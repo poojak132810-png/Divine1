@@ -1,0 +1,6 @@
+{
+  "name": "Dharma Devotee Hub",
+  "description": "A sacred temple sanctuary platform featuring daily aarti schedules, temple timings, seva bookings, hundi offerings, Vedic panchang, and AI Pandit guidance in multiple languages including Kannada.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

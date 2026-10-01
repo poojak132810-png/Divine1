@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    
+  }
+}
+
+.font-playfair {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+.font-cinzel {
+  font-family: 'Cinzel', Georgia, serif;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(20, 8, 8, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 153, 51, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 153, 51, 0.45);
+}
+
+@keyframes diyaPulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 12px rgba(255, 153, 51, 0.6)) drop-shadow(0 0 24px rgba(254, 98, 78, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 18px rgba(255, 180, 51, 0.8)) drop-shadow(0 0 36px rgba(254, 98, 78, 0.6));
+  }
+}
+
+.animate-diya {
+  animation: diyaPulse 3s ease-in-out infinite;
+}
