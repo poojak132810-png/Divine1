@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Calendar, CheckCircle2, Clock, Sparkles, ArrowLeft, Download, CreditCard, Smartphone, Loader2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { TEMPLE_SEVAS } from '../data/templeData';
@@ -19,6 +20,135 @@ const NAKSHATRAS = [
   'Purva Ashadha(ಪೂರ್ವ ಅಶಾದ)', 'Uttara Ashadha(ತ್ತರ ಅಶಾದ)', 'Shravana(ಶ್ರವಣ)', 'Dhanishta(ದಹನಿಷ್ಠ)',
   'Shatabhisha(ಶತಭಿಸ್ಯ)', 'Purva Bhadrapada(ಪೂರ್ವ ಭಾದ್ರಪದ)', 'Uttara Bhadrapada(ತ್ತರ ಭಾದ್ರಪದ)', 'Revati(ರೇವತಿ)',
 ];
+
+// A booking row from the server also carries its QR code
+type SavedBooking = SevaBooking & { booking_code?: string };
+
+// The link inside the QR: opens the seva pass page when scanned
+const passUrl = (code: string) => `${window.location.origin}/?pass=${code}`;
+
+// Remember which bookings were made on THIS device, so only they show a QR later
+const OWN_KEY = 'dh_my_booking_codes';
+const getOwnCodes = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem(OWN_KEY) || '[]');
+  } catch {
+    return [];
+  }
+};
+const saveOwnCode = (code: string) => {
+  try {
+    localStorage.setItem(OWN_KEY, JSON.stringify([...getOwnCodes(), code]));
+  } catch {
+    /* storage unavailable - QR still shows on the confirmation screen */
+  }
+};
+
+// ---------- Printing: only the chosen booking ----------
+type PrintData = {
+  sevaName: string;
+  tokenNumber: string;
+  devoteeName: string;
+  rashi: string;
+  nakshatra: string;
+  date: string;
+  slot: string;
+  amount: number;
+  sankalpa: string;
+  prasadamDelivery: boolean;
+  code?: string; // QR is printed only when we have the code (bookings made on this device)
+};
+
+const toPrintData = (b: SevaBooking, code?: string): PrintData => ({
+  sevaName: b.sevaName,
+  tokenNumber: String(b.tokenNumber),
+  devoteeName: b.devoteeName,
+  rashi: b.rashi,
+  nakshatra: b.nakshatra,
+  date: b.date,
+  slot: b.slot,
+  amount: Number(b.amount),
+  sankalpa: b.sankalpa || '',
+  prasadamDelivery: !!b.prasadamDelivery,
+  code,
+});
+
+const PrintSheet: React.FC<{ data: PrintData }> = ({ data }) => {
+  const rows: [string, string][] = [
+    ['Devotee', data.devoteeName],
+    ['Rashi / Nakshatra', `${data.rashi.split(' ')[0]} / ${data.nakshatra}`],
+    ['Date & Slot', `${data.date} • ${data.slot}`],
+    ['Amount Paid', `₹${data.amount}`],
+    ['Prasadam', data.prasadamDelivery ? 'Delivery requested' : 'Collect at temple counter'],
+  ];
+  if (data.sankalpa) rows.push(['Sankalpa', data.sankalpa]);
+
+  return (
+    <>
+      {/* Print rules live here, so no CSS file is needed */}
+      <style>{`
+        @media screen {
+          .print-sheet { display: none; }
+        }
+        @media print {
+          @page { margin: 12mm; }
+          html, body { background: #fff !important; }
+          body > *:not(.print-sheet) { display: none !important; }
+          .print-sheet { display: block !important; background: #fff; color: #000; font-family: 'Inter', sans-serif; }
+        }
+      `}</style>
+
+      <div className="print-sheet">
+        <div
+          style={{
+            maxWidth: 480,
+            margin: '0 auto',
+            border: '2px solid #b45309',
+            borderRadius: 12,
+            padding: 24,
+            textAlign: 'center',
+            color: '#000',
+          }}
+        >
+          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, margin: 0 }}>
+            Dharma Devotee Hub
+          </h1>
+          <p style={{ margin: '2px 0 18px', color: '#555', fontSize: 12, letterSpacing: 1 }}>SEVA PASS</p>
+
+          <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, margin: '0 0 6px' }}>
+            {data.sevaName}
+          </h2>
+          <p style={{ margin: '0 0 14px', fontSize: 13 }}>
+            Token: <strong style={{ fontFamily: 'monospace', fontSize: 15 }}>{data.tokenNumber}</strong>
+          </p>
+
+          {data.code && (
+            <div style={{ margin: '0 auto 16px', width: 168 }}>
+              <QRCodeSVG value={passUrl(data.code)} size={168} level="M" />
+            </div>
+          )}
+
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+            <tbody>
+              {rows.map(([label, value]) => (
+                <tr key={label} style={{ borderBottom: '1px solid #ddd' }}>
+                  <td style={{ padding: '7px 0', color: '#666', width: '40%' }}>{label}</td>
+                  <td style={{ padding: '7px 0', fontWeight: 600 }}>{value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <p style={{ marginTop: 16, fontSize: 11, color: '#666' }}>
+            {data.code
+              ? 'Show this pass at the temple on the day of your seva.'
+              : 'Please carry this pass with you on the day of your seva.'}
+          </p>
+        </div>
+      </div>
+    </>
+  );
+};
 
 interface BookingsScreenProps {
   initialSevaId?: string | null;
@@ -52,8 +182,26 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ initialSevaId })
   const [cardCvv, setCardCvv] = useState('');
   const [paymentError, setPaymentError] = useState('');
   const [confirmedBooking, setConfirmedBooking] = useState<SevaBooking | null>(null);
-  const [myBookings, setMyBookings] = useState<SevaBooking[]>([]);
+  const [confirmedBookingCode, setConfirmedBookingCode] = useState('');
+  const [myBookings, setMyBookings] = useState<SavedBooking[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
+  const [ownCodes, setOwnCodes] = useState<string[]>(getOwnCodes);
+  const [openQrCode, setOpenQrCode] = useState<string | null>(null);
+
+  // The single booking currently being printed
+  const [printData, setPrintData] = useState<PrintData | null>(null);
+
+  // When a booking is chosen for printing: wait for the sheet to render, print, then clear it
+  useEffect(() => {
+    if (!printData) return;
+    const clear = () => setPrintData(null);
+    window.addEventListener('afterprint', clear, { once: true });
+    const timer = setTimeout(() => window.print(), 150);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('afterprint', clear);
+    };
+  }, [printData]);
 
   const fetchBookings = async () => {
     try {
@@ -99,22 +247,21 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ initialSevaId })
     e.preventDefault();
     if (!bookingSeva) return;
 
-    // Basic fake validation so it feels real
-   // Proper UPI ID format check: name@handle (no dots, no email-style domains)
-const upiPattern = /^[a-zA-Z0-9.\-_]{2,49}@[a-zA-Z]{2,49}$/;
-const looksLikeEmail = /\.[a-zA-Z]{2,}$/.test(upiId); // catches .com, .in, .org etc.
+    // Proper UPI ID format check: name@handle (no dots, no email-style domains)
+    const upiPattern = /^[a-zA-Z0-9.\-_]{2,49}@[a-zA-Z]{2,49}$/;
+    const looksLikeEmail = /\.[a-zA-Z]{2,}$/.test(upiId); // catches .com, .in, .org etc.
 
-if (paymentMethod === 'upi') {
-  if (!upiPattern.test(upiId) || looksLikeEmail) {
-    setPaymentError('Enter a valid UPI ID (e.g. name@okhdfcbank), not an email address.');
-    return;
-  }
-}
-if (paymentMethod === 'card' && (cardNumber.length < 12 || cardCvv.length < 3)) {
-  setPaymentError('Enter a valid card number and CVV.');
-  return;
-}
-setPaymentError('');
+    if (paymentMethod === 'upi') {
+      if (!upiPattern.test(upiId) || looksLikeEmail) {
+        setPaymentError('Enter a valid UPI ID (e.g. name@okhdfcbank), not an email address.');
+        return;
+      }
+    }
+    if (paymentMethod === 'card' && (cardNumber.length < 12 || cardCvv.length < 3)) {
+      setPaymentError('Enter a valid card number and CVV.');
+      return;
+    }
+    setPaymentError('');
     setStage('processing');
 
     // Simulate gateway processing delay
@@ -141,6 +288,11 @@ setPaymentError('');
       });
       const data = await res.json();
 
+      // The server must send back the QR code; if not, the booking did not save properly
+      if (!res.ok || !data.bookingCode) {
+        throw new Error(data.error || 'Booking failed');
+      }
+
       const newBooking: SevaBooking = {
         id: data.id,
         sevaId: bookingSeva.id,
@@ -161,11 +313,15 @@ setPaymentError('');
       };
 
       setConfirmedBooking(newBooking);
+      setConfirmedBookingCode(data.bookingCode);
+      saveOwnCode(data.bookingCode);
+      setOwnCodes(getOwnCodes());
       setStage('confirmed');
       playTempleBell();
       fetchBookings();
     } catch (err) {
       console.error('Payment/booking failed', err);
+      setPaymentError('Could not complete your booking. Please try again.');
       setStage('payment');
     }
   };
@@ -173,6 +329,7 @@ setPaymentError('');
   const resetFlow = () => {
     setBookingSeva(null);
     setConfirmedBooking(null);
+    setConfirmedBookingCode('');
     setDevoteeName('');
     setUpiId('');
     setCardNumber('');
@@ -330,13 +487,12 @@ setPaymentError('');
                 </div>
               </>
             )}
-             {paymentError && (
+            {paymentError && (
               <p className="text-center text-[11px] text-[#ff6b6b] font-semibold bg-[#3d1010] border border-[#ff6b6b]/30 rounded-lg py-2 px-3">
                 {paymentError}
               </p>
             )}
             <button
-              
               type="submit"
               className="w-full py-3.5 rounded-xl bg-[#ff9933] hover:bg-[#ffaa4d] text-[#331400] font-bold text-sm tracking-wide transition-all shadow-lg shadow-[#ff9933]/20 cursor-pointer mt-2"
             >
@@ -367,10 +523,13 @@ setPaymentError('');
             Token: <span className="text-[#ff9933] font-bold font-mono text-sm">{confirmedBooking.tokenNumber}</span>
           </p>
 
-          {/* Real, scannable QR code encoding the token */}
-          <div className="w-36 h-36 mx-auto rounded-2xl bg-white p-3 shadow-inner flex items-center justify-center mb-4">
-            <QRCodeSVG value={confirmedBooking.tokenNumber} size={112} />
+          {/* Seva pass QR: opens the pass page, which checks the seva date when scanned */}
+          <div className="w-44 h-44 mx-auto rounded-2xl bg-white p-3 shadow-inner flex items-center justify-center mb-2">
+            <QRCodeSVG value={passUrl(confirmedBookingCode)} size={152} level="M" />
           </div>
+          <p className="text-[11px] text-[#998172] mb-4">
+            Show this QR at the temple on the day of your seva.
+          </p>
 
           <div className="p-4 rounded-2xl bg-[#290d09] border border-[#481811] text-xs text-left space-y-2 mb-5">
             <div className="flex justify-between border-b border-[#3b140e] pb-1.5">
@@ -406,7 +565,7 @@ setPaymentError('');
               View in My Bookings
             </button>
             <button
-              onClick={() => window.print()}
+              onClick={() => setPrintData(toPrintData(confirmedBooking, confirmedBookingCode))}
               className="px-4 py-3 rounded-xl bg-[#2b0f0b] hover:bg-[#3d150e] text-[#f6e4d2] font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Download className="w-4 h-4" />
@@ -631,51 +790,83 @@ setPaymentError('');
               </button>
             </div>
           ) : (
-            myBookings.map((b) => (
-              <div key={b.id} className="p-4 sm:p-5 rounded-2xl bg-[#1a0806] border border-[#481a12] text-xs space-y-3 shadow-md">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <span className="px-2.5 py-0.5 rounded-full bg-[#183a18] text-[#7ce67c] border border-[#307030] text-[10px] font-bold uppercase tracking-wider">
-                      {b.status}
-                    </span>
-                    <h3 className="font-playfair text-lg font-bold text-[#fff4e8] mt-1.5">{b.sevaName}</h3>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-[#ff9933] font-mono block">{b.tokenNumber}</span>
-                    <span className="text-[10px] text-[#998172]">Token Pass</span>
-                  </div>
-                </div>
+            myBookings.map((b) => {
+              const code = b.booking_code;
+              const isMine = !!code && ownCodes.includes(code);
 
-                <div className="grid grid-cols-2 gap-2 p-3 rounded-xl bg-[#220c08] border border-[#3e1610]">
-                  <div>
-                    <span className="text-[10px] text-[#998172] block">Devotee</span>
-                    <span className="font-bold text-[#fef5ee]">{b.devoteeName}</span>
+              return (
+                <div key={b.id} className="p-4 sm:p-5 rounded-2xl bg-[#1a0806] border border-[#481a12] text-xs space-y-3 shadow-md">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#183a18] text-[#7ce67c] border border-[#307030] text-[10px] font-bold uppercase tracking-wider">
+                        {b.status}
+                      </span>
+                      <h3 className="font-playfair text-lg font-bold text-[#fff4e8] mt-1.5">{b.sevaName}</h3>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs font-bold text-[#ff9933] font-mono block">{b.tokenNumber}</span>
+                      <span className="text-[10px] text-[#998172]">Token Pass</span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-[#998172] block">Rashi / Nakshatra</span>
-                    <span className="font-bold text-[#fef5ee]">{b.rashi.split(' ')[0]} / {b.nakshatra}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-[#998172] block">Date & Slot</span>
-                    <span className="font-bold text-[#ffb77a]">{b.date} • {b.slot}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-[#998172] block">Amount Paid</span>
-                    <span className="font-bold text-[#fef5ee]">₹{b.amount}</span>
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between text-[11px] text-[#a89080] pt-1">
-                  <span>Sankalpa: <em className="text-[#f6e4d2]">{b.sankalpa}</em></span>
-                  <button onClick={() => window.print()} className="text-[#ff9933] font-bold hover:underline">
-                    Print Pass
-                  </button>
+                  <div className="grid grid-cols-2 gap-2 p-3 rounded-xl bg-[#220c08] border border-[#3e1610]">
+                    <div>
+                      <span className="text-[10px] text-[#998172] block">Devotee</span>
+                      <span className="font-bold text-[#fef5ee]">{b.devoteeName}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-[#998172] block">Rashi / Nakshatra</span>
+                      <span className="font-bold text-[#fef5ee]">{b.rashi.split(' ')[0]} / {b.nakshatra}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-[#998172] block">Date & Slot</span>
+                      <span className="font-bold text-[#ffb77a]">{b.date} • {b.slot}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-[#998172] block">Amount Paid</span>
+                      <span className="font-bold text-[#fef5ee]">₹{b.amount}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-[#a89080] pt-1">
+                    <span>Sankalpa: <em className="text-[#f6e4d2]">{b.sankalpa}</em></span>
+                    <div className="flex items-center gap-3">
+                      {isMine && code && (
+                        <button
+                          onClick={() => setOpenQrCode(openQrCode === code ? null : code)}
+                          className="text-[#ff9933] font-bold hover:underline"
+                        >
+                          {openQrCode === code ? 'Hide QR' : 'Show QR'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setPrintData(toPrintData(b, isMine ? code : undefined))}
+                        className="text-[#ff9933] font-bold hover:underline"
+                      >
+                        Print Pass
+                      </button>
+                    </div>
+                  </div>
+
+                  {isMine && code && openQrCode === code && (
+                    <div className="text-center">
+                      <div className="w-44 h-44 mx-auto rounded-2xl bg-white p-3 flex items-center justify-center">
+                        <QRCodeSVG value={passUrl(code)} size={152} level="M" />
+                      </div>
+                      <p className="text-[10px] text-[#998172] mt-2">
+                        Show this QR at the temple on the day of your seva.
+                      </p>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
+
+      {/* Print-only pass: rendered outside #root so printing shows just this booking */}
+      {printData && createPortal(<PrintSheet data={printData} />, document.body)}
     </div>
   );
 };

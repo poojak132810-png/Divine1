@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import db from "./db";
+import { randomUUID } from "crypto";
 
 dotenv.config();
 
@@ -16,6 +17,39 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Simple staff guard (header must match ADMIN_PASSWORD)
+  const requireAdmin: express.RequestHandler = (req, res, next) => {
+    const pass = req.header("x-admin-password");
+    if (pass && pass === process.env.ADMIN_PASSWORD) return next();
+    res.status(401).json({ error: "Staff access required" });
+  };
+
+  // Date helpers (temple time = IST)
+  const todayIST = () =>
+    new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+  const toISODate = (value: string): string | null => {
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+
+    // DD/MM/YYYY
+    const m = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const [, d, mo, y] = m;
+      return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
+
+    const dt = new Date(value);
+    return isNaN(dt.getTime())
+      ? null
+      : dt.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  };
+
+  const daysBetween = (fromISO: string, toISO: string) => {
+    const [fy, fm, fd] = fromISO.split("-").map(Number);
+    const [ty, tm, td] = toISO.split("-").map(Number);
+    return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+  };
+
   // Health check endpoint
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -27,13 +61,14 @@ async function startServer() {
       const b = req.body;
       const id = `seva-${Date.now()}`;
       const tokenNumber = `DH-SEVA-${Math.floor(1000 + Math.random() * 9000)}`;
+      const bookingCode = randomUUID(); // Generate a unique booking code
 
       db.prepare(`
         INSERT INTO bookings
         (id, sevaId, sevaName, devoteeName, rashi, nakshatra, date, slot, sankalpa,
-         amount, prasadamDelivery, address, bookingTime, status, tokenNumber, paymentMethod, createdAt)
+         amount, prasadamDelivery, address, bookingTime, status, tokenNumber, paymentMethod, createdAt, booking_code)
         VALUES (@id, @sevaId, @sevaName, @devoteeName, @rashi, @nakshatra, @date, @slot, @sankalpa,
-                @amount, @prasadamDelivery, @address, @bookingTime, @status, @tokenNumber, @paymentMethod, @createdAt)
+                @amount, @prasadamDelivery, @address, @bookingTime, @status, @tokenNumber, @paymentMethod, @createdAt, @booking_code)
       `).run({
         id,
         sevaId: b.sevaId,
@@ -52,9 +87,10 @@ async function startServer() {
         tokenNumber,
         paymentMethod: b.paymentMethod || "UPI",
         createdAt: new Date().toISOString(),
+        booking_code: bookingCode,
       });
 
-      res.json({ id, tokenNumber, status: "Confirmed" });
+      res.json({ id, tokenNumber, bookingCode, status: "Confirmed" });
     } catch (err) {
       console.error("Booking insert error:", err);
       res.status(500).json({ error: "Could not save booking" });
@@ -68,6 +104,131 @@ async function startServer() {
     } catch (err) {
       console.error("Bookings list error:", err);
       res.json([]);
+    }
+  });
+
+  // Public: what a devotee sees when they scan their seva QR
+  app.get("/api/bookings/verify/:code", (req, res) => {
+    try {
+      const row = db
+        .prepare(
+          `SELECT sevaName, devoteeName, date, slot, tokenNumber, status, checked_in_at
+           FROM bookings WHERE booking_code = ?`
+        )
+        .get(req.params.code) as any;
+
+      if (!row) {
+        return res.status(404).json({ status: "invalid", message: "Booking not found." });
+      }
+
+      const sevaDate = toISODate(row.date);
+      if (!sevaDate) {
+        return res.status(500).json({ status: "error", message: "Booking date could not be read." });
+      }
+
+      const diffDays = daysBetween(todayIST(), sevaDate); // >0 = future, <0 = past
+
+      let status: string;
+      let message: string;
+
+      if (String(row.status).toLowerCase() === "cancelled") {
+        status = "cancelled";
+        message = "This booking was cancelled.";
+      } else if (row.checked_in_at) {
+        status = "used";
+        message = "This pass has already been used.";
+      } else if (diffDays === 0) {
+        status = "valid";
+        message = "Valid for today. Welcome! 🙏";
+      } else if (diffDays === 1) {
+        status = "upcoming";
+        message = "Your seva is tomorrow.";
+      } else if (diffDays > 1) {
+        status = "upcoming";
+        message = `Your seva is in ${diffDays} days.`;
+      } else {
+        status = "expired";
+        message = "This seva date has passed.";
+      }
+
+      res.json({
+        status,
+        message,
+        booking: {
+          sevaName: row.sevaName,
+          bookerName: row.devoteeName,
+          date: sevaDate,
+          timeSlot: row.slot,
+          token: row.tokenNumber,
+        },
+      });
+    } catch (err) {
+      console.error("Booking verify error:", err);
+      res.status(500).json({ status: "error", message: "Something went wrong." });
+    }
+  });
+
+  // Staff only: mark the pass as used on the seva day
+  app.post("/api/bookings/verify/:code/check-in", requireAdmin, (req, res) => {
+    try {
+      const row = db
+        .prepare(`SELECT date, status, checked_in_at FROM bookings WHERE booking_code = ?`)
+        .get(req.params.code) as any;
+
+      if (!row) return res.status(404).json({ error: "Booking not found" });
+      if (String(row.status).toLowerCase() === "cancelled")
+        return res.status(400).json({ error: "Booking was cancelled" });
+      if (row.checked_in_at) return res.status(409).json({ error: "Already checked in" });
+      if (toISODate(row.date) !== todayIST())
+        return res.status(400).json({ error: "This pass is not valid today" });
+
+      db.prepare(`UPDATE bookings SET checked_in_at = ? WHERE booking_code = ?`)
+        .run(new Date().toISOString(), req.params.code);
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Check-in error:", err);
+      res.status(500).json({ error: "Could not check in" });
+    }
+  });
+    // Staff only: all bookings with their pass status
+  app.get("/api/admin/bookings", requireAdmin, (req, res) => {
+    try {
+      const rows = db
+        .prepare(
+          `SELECT id, sevaName, devoteeName, date, slot, tokenNumber, status, checked_in_at
+           FROM bookings ORDER BY createdAt DESC`
+        )
+        .all() as any[];
+
+      const today = todayIST();
+      const list = rows.map((r) => {
+        const iso = toISODate(r.date);
+        let passStatus: string;
+        if (String(r.status).toLowerCase() === "cancelled") passStatus = "cancelled";
+        else if (r.checked_in_at) passStatus = "visited";
+        else if (!iso) passStatus = "unknown";
+        else if (iso === today) passStatus = "today";
+        else if (iso > today) passStatus = "upcoming";
+        else passStatus = "expired";
+
+        return {
+          id: r.id,
+          token: r.tokenNumber,
+          devoteeName: r.devoteeName,
+          sevaName: r.sevaName,
+          date: iso || "",
+          slot: r.slot,
+          passStatus,
+          checkedInAt: r.checked_in_at,
+        };
+      });
+
+      list.sort((a, b) => b.date.localeCompare(a.date));
+      res.json(list);
+    } catch (err) {
+      console.error("Admin bookings error:", err);
+      res.status(500).json({ error: "Could not load bookings" });
     }
   });
 
@@ -301,5 +462,6 @@ async function startServer() {
     console.log(`Dharma Devotee Hub server running on port ${PORT}`);
   });
 }
+
 
 startServer();

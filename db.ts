@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { randomUUID } from "crypto";
 import path from "path";
 
 const db = new Database(path.join(process.cwd(), "temple.db"));
@@ -22,7 +23,9 @@ db.exec(`
     status TEXT NOT NULL,
     tokenNumber TEXT NOT NULL,
     paymentMethod TEXT,
-    createdAt TEXT NOT NULL
+    createdAt TEXT NOT NULL,
+    booking_code TEXT,
+    checked_in_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS donations (
@@ -84,5 +87,21 @@ if (!memberCols.some((c) => c.name === "memberNumber")) {
     DROP TABLE members_old;
   `);
 }
+// Migration: QR pass columns for bookings
+const bookingCols = db.prepare(`PRAGMA table_info(bookings)`).all() as { name: string }[];
+if (!bookingCols.some((c) => c.name === "booking_code")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN booking_code TEXT`);
+}
+if (!bookingCols.some((c) => c.name === "checked_in_at")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN checked_in_at TEXT`);
+}
 
-export default db;
+// Give old bookings a code too
+const missing = db.prepare(`SELECT id FROM bookings WHERE booking_code IS NULL`).all() as { id: string }[];
+const setCode = db.prepare(`UPDATE bookings SET booking_code = ? WHERE id = ?`);
+db.transaction(() => {
+  for (const row of missing) setCode.run(randomUUID(), row.id);
+})();
+
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_code ON bookings(booking_code)`);
+  export default db;

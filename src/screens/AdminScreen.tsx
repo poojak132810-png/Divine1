@@ -3,6 +3,7 @@ import { ShieldCheck, LayoutDashboard, Lock, Loader2, LogOut, Users, Plus, X, Sc
 import { SevaBooking, DonationRecord, TempleMember } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import { ScannerScreen } from '../components/ScannerScreen';
+import AdminBookings  from '../components/AdminBookings';
 
 interface Stats {
   totalBookings: number;
@@ -19,7 +20,7 @@ export const AdminScreen: React.FC = () => {
   const [loggingIn, setLoggingIn] = useState(false);
 
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'bookings' | 'donations' | 'members' | 'scanner'
+    'overview' | 'bookings' | 'donations' | 'members' | 'scanner' | 'passes'
   >(() =>
     sessionStorage.getItem('admin-open-tab') === 'members'
       ? 'members'
@@ -54,6 +55,7 @@ export const AdminScreen: React.FC = () => {
 
     if (savedAuth === 'true') {
       setIsAuthed(true);
+      setPassword(sessionStorage.getItem('admin-password') || '');
     }
   }, []);
 
@@ -116,6 +118,7 @@ export const AdminScreen: React.FC = () => {
 
       if (data.success) {
         sessionStorage.setItem('admin-authed', 'true');
+        sessionStorage.setItem('admin-password', password);
         setIsAuthed(true);
       } else {
         setLoginError('Incorrect password.');
@@ -129,6 +132,7 @@ export const AdminScreen: React.FC = () => {
 
   const handleLogout = () => {
     sessionStorage.removeItem('admin-authed');
+    sessionStorage.removeItem('admin-password');
     setIsAuthed(false);
     setPassword('');
   };
@@ -469,7 +473,7 @@ export const AdminScreen: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="grid grid-cols-5 p-1 rounded-2xl bg-[#1e0a07] border border-[#3f1610] mb-5">
+      <div className="grid grid-cols-6 p-1 rounded-2xl bg-[#1e0a07] border border-[#3f1610] mb-5">
 
         <button
           onClick={() => setActiveTab('overview')}
@@ -491,6 +495,17 @@ export const AdminScreen: React.FC = () => {
           }`}
         >
           Bookings ({bookings.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('passes')}
+          className={`py-2 text-xs font-bold rounded-xl transition-all ${
+            activeTab === 'passes'
+              ? 'bg-[#ff9933] text-[#331400] shadow-md'
+              : 'text-[#c9b4a4]'
+          }`}
+        >
+          Visits
         </button>
 
         <button
@@ -1257,6 +1272,9 @@ export const AdminScreen: React.FC = () => {
               })()}
 
             </div>
+          )}
+                    {activeTab === 'passes' && (
+            <AdminBookings adminPassword={password} />
           )}
 
           {/* ==================================================

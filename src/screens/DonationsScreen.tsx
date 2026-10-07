@@ -116,7 +116,7 @@ export const DonationsScreen: React.FC<DonationsScreenProps> = ({ initialCauseId
         cause: causeTitle,
         amount,
         devoteeName: devoteeName.trim(),
-        panNumber: phoneNumber.trim() || undefined,
+        phoneNumber: phoneNumber.trim() || undefined,
         sankalpaOccasion: sankalpaOccasion.trim() || 'General Temple Dharma Offering',
         date: new Date().toLocaleDateString('en-IN', {
           day: 'numeric',
@@ -308,10 +308,10 @@ export const DonationsScreen: React.FC<DonationsScreenProps> = ({ initialCauseId
               <span className="text-[#998172]">Date of Offering</span>
               <span className="font-bold text-[#fef5ee]">{receipt.date}</span>
             </div>
-            {receipt.panNumber && (
+            {receipt.phoneNumber && (
               <div className="flex justify-between border-b border-[#3b140e] pb-1.5">
                 <span className="text-[#998172]">Phone Number</span>
-                <span className="font-bold font-mono text-[#fef5ee]">{receipt.panNumber}</span>
+                <span className="font-bold font-mono text-[#fef5ee]">{receipt.phoneNumber}</span>
               </div>
             )}
             <div className="flex justify-between">

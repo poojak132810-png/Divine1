@@ -84,7 +84,7 @@ export const MemberVerifyScreen: React.FC<MemberVerifyScreenProps> = ({ memberNu
           <div className="rounded-3xl overflow-hidden border-2 border-[#ff9933]/50 shadow-2xl">
             <div className={`p-10 flex flex-col items-center justify-center ${member.status === 'Active' ? 'bg-[#183a18]' : 'bg-[#3d1010]'}`}>
               {member.status === 'Active' ? (
-                <div classname="w-52 h-52 bg-white rounded-xl p-2 flex items-center justify-center">
+                <div className="w-52 h-52 bg-white rounded-xl p-2 flex items-center justify-center">
                   <QRCodeSVG value={`${window.location.origin}/?verify=${member.memberNumber}`} size={124} />
                 </div>
               ) : (

@@ -26,17 +26,26 @@ import { TabType, LanguageCode, AartiScheduleItem, FestivalItem } from './types'
 import templeMaroonExpandedImg from './assets/images/temple_maroon_expanded_1788503278889.jpg';
 import templeMaroonMobileImg from './assets/images/temple_maroon_mobile_1788503296097.jpg';
 import { ScannerScreen } from './components/ScannerScreen';
+import VerifyBooking from './components/VerifyBookings';
+import SevaPass from './components/SevaPass';
+import AdminBookings from './components/AdminBookings';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabType>(()=>
-    new URLSearchParams(window.location.search).get('tab')==='admin'?'admin' : 'home' 
-);
+  const [activeTab, setActiveTab] = useState<TabType>(() =>
+    new URLSearchParams(window.location.search).get('tab') === 'admin' ? 'admin' : 'home'
+  );
+    if (window.location.pathname.startsWith("/seva-pass/")) {
+    return <SevaPass />;
+  }
   const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>('en');
 
   // Check if this is a public member-verification link (?verify=TMP-2026-0001)
   const urlParams = new URLSearchParams(window.location.search);
   const verifyId = urlParams.get('verify');
+  // Public seva-pass link opened from a booking QR (?pass=<booking code>)
+  const passCode = urlParams.get('pass');
   const isScannerRoute = new URLSearchParams(window.location.search).get('scan') === '1';
+
   // Modal dialog states
   const [isCornerAIOpen, setIsCornerAIOpen] = useState(false);
   const [isTimingsOpen, setIsTimingsOpen] = useState(false);
@@ -83,15 +92,22 @@ export default function App() {
   if (verifyId) {
     return <MemberVerifyScreen memberNumber={verifyId} />;
   }
+
+  // Public seva-pass page (opened by scanning a booking QR)
+  if (passCode) {
+    return <VerifyBooking code={passCode} />;
+  }
+
   if (isScannerRoute) {
     return <ScannerScreen />;
   }
+
   return (
-       <div className="min-h-screen w-full overflow-x-hidden  bg-[#120504] text-[#f8ede3] flex flex-col selection:bg-[#ff9933] selection:text-[#1a0a08] relative">
+    <div className="min-h-screen w-full overflow-x-hidden bg-[#120504] text-[#f8ede3] flex flex-col selection:bg-[#ff9933] selection:text-[#1a0a08] relative">
       {/* Expanded Sacred Temple Maroon Background with Adjustable Transparency */}
-        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none">
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none">
         <picture className="w-full h-full">
-            <source
+          <source
             media="(min-width: 768px)"
             srcSet={templeMaroonExpandedImg}
           />
@@ -265,6 +281,6 @@ export default function App() {
           setSelectedAarti(TODAY_AARTIS[1]);
         }}
       />
-       </div>
+    </div>
   );
 }
